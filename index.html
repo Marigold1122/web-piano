@@ -1434,10 +1434,10 @@
                             <option value="drums">🥁 鼓组</option>
                         </select>
                         <select id="voicePresetSelect" class="hidden"></select>
-                        <button id="voiceCloneBtn" class="btn hidden" style="font-size:12px;padding:4px 10px;">🎙️ 克隆声线</button>
-                        <button id="voiceDeletePresetBtn" class="btn hidden" style="font-size:12px;padding:4px 8px;background:#ff4444;">🗑️</button>
-                        <button id="voiceExportBtn" class="btn hidden" style="font-size:12px;padding:4px 8px;">📤 导出</button>
-                        <button id="voiceImportBtn" class="btn hidden" style="font-size:12px;padding:4px 8px;">📥 导入</button>
+                        <button id="voiceCloneBtn" class="btn hidden">🎙️ 克隆声线</button>
+                        <button id="voiceDeletePresetBtn" class="btn hidden" style="background:#ff4444;">🗑️</button>
+                        <button id="voiceExportBtn" class="btn hidden">📤 导出</button>
+                        <button id="voiceImportBtn" class="btn hidden">📥 导入</button>
                         <input type="file" id="voiceImportFile" accept=".wpvoice" style="display:none;">
                         <div id="voiceEffectsPanel" class="hidden">
                             <label class="label-small flex-row">
@@ -8021,62 +8021,62 @@ registerProcessor('freeverb-processor', FreeverbProcessor);
 
     <!-- Voice Clone Modal -->
     <div id="voiceCloneModal" class="pr-modal">
-        <div class="pr-modal-content" style="width:420px;height:auto;max-height:80vh;">
+        <div class="pr-modal-content" style="width:min(420px, 90vw);height:auto;max-height:80vh;">
             <div class="pr-modal-header" style="justify-content:space-between;">
                 <div class="pr-modal-title">🎙️ 克隆声线</div>
                 <button class="pr-modal-close" id="voiceCloneModalClose">&times;</button>
             </div>
-            <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
+            <div style="padding:var(--space-lg);display:flex;flex-direction:column;gap:var(--space-md);overflow-y:auto;">
                 <label class="label-small">声线名称（可选，不填自动生成）</label>
                 <input type="text" id="vcDisplayNameInput" placeholder="例：七海的声音" style="width:100%;">
                 <label class="label-small">参考音频（5-25秒说话/唱歌片段）</label>
                 <input type="file" id="vcFileInput" accept=".wav,.mp3,.flac,.ogg,.m4a">
 
                 <!-- 高级参数折叠面板 -->
-                <details id="vcAdvancedParams" style="border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:0;">
-                    <summary style="padding:8px 12px;cursor:pointer;color:var(--text-secondary);user-select:none;">⚙️ 高级参数 <span style="opacity:0.6;">（参数不懂的话最好不要动咕~默认效果大多情况下也很好！）</span></summary>
-                    <div style="padding:8px 12px 12px;display:flex;flex-direction:column;gap:10px;">
+                <details id="vcAdvancedParams" style="border:1px solid rgba(255,255,255,0.1);border-radius:var(--radius-sm);padding:0;">
+                    <summary style="padding:var(--space-sm) var(--space-md);cursor:pointer;color:var(--text-secondary);user-select:none;font-size:var(--font-xs);">⚙️ 高级参数 <span style="opacity:0.6;">（参数不懂的话最好不要动咕~默认效果大多情况下也很好！）</span></summary>
+                    <div style="padding:var(--space-sm) var(--space-md) var(--space-md);display:flex;flex-direction:column;gap:var(--space-sm);">
                         <div style="display:flex;align-items:center;justify-content:space-between;">
                             <label class="label-small" style="margin:0;" title="扩散步数，越高质量越好但越慢（10-100）">扩散步数</label>
-                            <div style="display:flex;align-items:center;gap:6px;">
-                                <input type="range" id="vcDiffusionSteps" min="10" max="100" step="5" value="40" style="width:100px;">
-                                <span id="vcDiffusionStepsVal" style="min-width:24px;text-align:right;" class="value-display">40</span>
+                            <div style="display:flex;align-items:center;gap:var(--space-sm);">
+                                <input type="range" id="vcDiffusionSteps" min="10" max="100" step="5" value="40" style="width:clamp(60px, 12vw, 100px);">
+                                <span id="vcDiffusionStepsVal" style="min-width:2em;text-align:right;" class="value-display">40</span>
                             </div>
                         </div>
                         <div style="display:flex;align-items:center;justify-content:space-between;">
                             <label class="label-small" style="margin:0;" title="推理引导率，越高越像参考音色（0.0-1.0）">相似度引导</label>
-                            <div style="display:flex;align-items:center;gap:6px;">
-                                <input type="range" id="vcCfgRate" min="0" max="1" step="0.05" value="0.7" style="width:100px;">
-                                <span id="vcCfgRateVal" style="min-width:28px;text-align:right;" class="value-display">0.7</span>
+                            <div style="display:flex;align-items:center;gap:var(--space-sm);">
+                                <input type="range" id="vcCfgRate" min="0" max="1" step="0.05" value="0.7" style="width:clamp(60px, 12vw, 100px);">
+                                <span id="vcCfgRateVal" style="min-width:2.5em;text-align:right;" class="value-display">0.7</span>
                             </div>
                         </div>
                         <div style="display:flex;align-items:center;justify-content:space-between;">
                             <label class="label-small" style="margin:0;" title="输出长度倍率（0.5-2.0）">长度调整</label>
-                            <div style="display:flex;align-items:center;gap:6px;">
-                                <input type="range" id="vcLengthAdjust" min="0.5" max="2.0" step="0.05" value="1.0" style="width:100px;">
-                                <span id="vcLengthAdjustVal" style="min-width:28px;text-align:right;" class="value-display">1.0</span>
+                            <div style="display:flex;align-items:center;gap:var(--space-sm);">
+                                <input type="range" id="vcLengthAdjust" min="0.5" max="2.0" step="0.05" value="1.0" style="width:clamp(60px, 12vw, 100px);">
+                                <span id="vcLengthAdjustVal" style="min-width:2.5em;text-align:right;" class="value-display">1.0</span>
                             </div>
                         </div>
                         <div style="display:flex;align-items:center;justify-content:space-between;">
-                            <label class="label-small" style="margin:0;" title="半音偏移，正值升调负值降调（-12到12）">半音偏移</label>
-                            <div style="display:flex;align-items:center;gap:6px;">
-                                <input type="range" id="vcSemiToneShift" min="-24" max="24" step="1" value="0" style="width:100px;">
-                                <span id="vcSemiToneShiftVal" style="min-width:24px;text-align:right;" class="value-display">0</span>
+                            <label class="label-small" style="margin:0;" title="半音偏移，正值升调负值降调">半音偏移</label>
+                            <div style="display:flex;align-items:center;gap:var(--space-sm);">
+                                <input type="range" id="vcSemiToneShift" min="-24" max="24" step="1" value="0" style="width:clamp(60px, 12vw, 100px);">
+                                <span id="vcSemiToneShiftVal" style="min-width:2em;text-align:right;" class="value-display">0</span>
                             </div>
                         </div>
                         <div style="display:flex;align-items:center;justify-content:space-between;">
                             <label class="label-small" style="margin:0;" title="保留原始音高轮廓">F0 音高保留</label>
-                            <input type="checkbox" id="vcF0Condition" checked style="width:16px;height:16px;">
+                            <input type="checkbox" id="vcF0Condition" checked style="width:1em;height:1em;">
                         </div>
                         <div style="display:flex;align-items:center;justify-content:space-between;">
                             <label class="label-small" style="margin:0;" title="自动将音高调整到参考音色的音域">自动 F0 调整</label>
-                            <input type="checkbox" id="vcAutoF0Adjust" style="width:16px;height:16px;">
+                            <input type="checkbox" id="vcAutoF0Adjust" style="width:1em;height:1em;">
                         </div>
                     </div>
                 </details>
 
                 <div id="vcProgressArea" style="display:none;">
-                    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                    <div style="display:flex;justify-content:space-between;margin-bottom:var(--space-xs);">
                         <span id="vcProgressText" class="label-small">准备中...</span>
                         <span id="vcProgressPercent" class="label-small">0%</span>
                     </div>
@@ -8084,9 +8084,9 @@ registerProcessor('freeverb-processor', FreeverbProcessor);
                         <div id="vcProgressBar" style="height:100%;width:0%;background:var(--daw-accent);border-radius:3px;transition:width 0.3s;"></div>
                     </div>
                 </div>
-                <div id="vcErrorArea" style="display:none;color:#ff6b6b;"></div>
+                <div id="vcErrorArea" style="display:none;color:#ff6b6b;font-size:var(--font-xs);"></div>
                 <button class="btn" id="vcStartBtn">开始克隆</button>
-                <div style="font-size:11px;color:var(--text-secondary);opacity:0.6;text-align:center;">
+                <div style="font-size:var(--font-xs);color:var(--text-secondary);opacity:0.6;text-align:center;">
                     由 <a href="https://huggingface.co/spaces/Plachta/Seed-VC" target="_blank" style="color:inherit;">Seed-VC</a> 提供 AI 转换，首次使用可能需要等待模型加载
                 </div>
             </div>
