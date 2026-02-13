@@ -1434,6 +1434,11 @@
                             <option value="drums">🥁 鼓组</option>
                         </select>
                         <select id="voicePresetSelect" class="hidden"></select>
+                        <button id="voiceCloneBtn" class="btn hidden" style="font-size:12px;padding:4px 10px;">🎙️ 克隆声线</button>
+                        <button id="voiceDeletePresetBtn" class="btn hidden" style="font-size:12px;padding:4px 8px;background:#ff4444;">🗑️</button>
+                        <button id="voiceExportBtn" class="btn hidden" style="font-size:12px;padding:4px 8px;">📤 导出</button>
+                        <button id="voiceImportBtn" class="btn hidden" style="font-size:12px;padding:4px 8px;">📥 导入</button>
+                        <input type="file" id="voiceImportFile" accept=".wpvoice" style="display:none;">
                         <div id="voiceEffectsPanel" class="hidden">
                             <label class="label-small flex-row">
                                 <input type="checkbox" id="voiceReverbToggle"> 🏛️ 空间混响
@@ -3145,7 +3150,6 @@ registerProcessor('freeverb-processor', FreeverbProcessor);
                 initVoicePresetSelector();
                 initVoiceEffectsPanel();
                 initVoiceClone();
-                discoverServerPresets();
                 discoverIDBPresets();
             }, VOICE_BASE_URL);
 
@@ -6025,7 +6029,7 @@ registerProcessor('freeverb-processor', FreeverbProcessor);
             });
         }
 
-        // Download WAVs from server path and save to IndexedDB
+        // Download WAVs from server path and save to IndexedDB (legacy, kept for compatibility)
         async function downloadPresetToIDB(presetKey, displayName, serverPath, noteNames) {
             const noteBlobs = {};
             for (const note of noteNames) {
@@ -6034,8 +6038,6 @@ registerProcessor('freeverb-processor', FreeverbProcessor);
                 noteBlobs[note] = await resp.blob();
             }
             await savePresetToIDB(presetKey, displayName, noteBlobs);
-            // Clean up server files
-            try { await fetch(`/api/voice-clone/preset/${presetKey}`, { method: 'DELETE' }); } catch (e) {}
         }
 
         // Load IDB presets into VOICE_PRESETS on startup
@@ -6052,26 +6054,6 @@ registerProcessor('freeverb-processor', FreeverbProcessor);
                 }
                 if (presets.length > 0) initVoicePresetSelector();
             } catch (e) { console.warn('IndexedDB 预设加载失败:', e); }
-        }
-
-        // Discover cloned presets from server and merge into VOICE_PRESETS
-        async function discoverServerPresets() {
-            try {
-                const resp = await fetch('/api/voice-presets');
-                if (!resp.ok) return;
-                const presets = await resp.json();
-                for (const p of presets) {
-                    if (!VOICE_PRESETS[p.key]) {
-                        VOICE_PRESETS[p.key] = {
-                            name: p.name || p.key,
-                            path: p.path,
-                            range: { min: 'C4', max: 'C5' },
-                            notes: p.notes
-                        };
-                    }
-                }
-                initVoicePresetSelector();
-            } catch (e) { console.warn('预设发现失败:', e); }
         }
 
         function initVoicePresetSelector() {
@@ -6123,7 +6105,259 @@ registerProcessor('freeverb-processor', FreeverbProcessor);
             }
         }
 
-        // === Voice Clone ===
+        // === Voice Clone: HF Gradio API (Seed-VC v1) ===
+        const SEEDVC_HF_SPACE = 'https://plachta-seed-vc.hf.space';
+        const SEEDVC_API_ENDPOINT = '/predict_1';
+        const SOURCE_AUDIO_PATH = '/samples/source/notes13.mp3';
+
+        // 预分析的 notes13.mp3 音符时间轴（秒），通过音量分析确定
+        const NOTE_SLICES = [
+            { note: 'C4',  start: 1.648667, end: 3.161583 },
+            { note: 'Db4', start: 7.147500, end: 8.657937 },
+            { note: 'D4',  start: 12.534021, end: 14.044771 },
+            { note: 'Eb4', start: 17.986125, end: 19.478208 },
+            { note: 'E4',  start: 23.480979, end: 24.851062 },
+            { note: 'F4',  start: 28.944792, end: 30.433229 },
+            { note: 'Gb4', start: 34.431208, end: 35.956583 },
+            { note: 'G4',  start: 39.899896, end: 41.418563 },
+            { note: 'Ab4', start: 45.293354, end: 46.824438 },
+            { note: 'A4',  start: 50.760333, end: 52.274979 },
+            { note: 'Bb4', start: 56.249792, end: 57.782958 },
+            { note: 'B4',  start: 61.714333, end: 63.237542 },
+            { note: 'C5',  start: 67.120583, end: 68.660667 },
+        ];
+
+        // 上传文件到 HF Gradio Space
+        async function hfUploadFile(blob, filename) {
+            const formData = new FormData();
+            formData.append('files', blob, filename);
+            const resp = await fetch(`${SEEDVC_HF_SPACE}/gradio_api/upload`, {
+                method: 'POST', body: formData
+            });
+            if (!resp.ok) throw new Error(`上传失败: ${resp.status}`);
+            const paths = await resp.json();
+            return paths[0]; // 返回服务器路径
+        }
+
+        // 调用 HF Gradio Space 的 predict 接口
+        async function hfPredict(sourcePath, refPath, params) {
+            const body = {
+                data: [
+                    { path: sourcePath, meta: { _type: 'gradio.FileData' } },
+                    { path: refPath, meta: { _type: 'gradio.FileData' } },
+                    params.diffusionSteps || 10,
+                    params.lengthAdjust || 1.0,
+                    params.cfgRate || 0.7,
+                    params.f0Condition || false,
+                    params.autoF0Adjust !== undefined ? params.autoF0Adjust : true,
+                    params.pitchShift || 0
+                ]
+            };
+            const resp = await fetch(`${SEEDVC_HF_SPACE}/gradio_api/call${SEEDVC_API_ENDPOINT}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            if (!resp.ok) throw new Error(`API 调用失败: ${resp.status}`);
+            const { event_id } = await resp.json();
+            return event_id;
+        }
+
+        // 通过 SSE 获取 Gradio 结果
+        function hfGetResult(eventId, onProgress) {
+            return new Promise((resolve, reject) => {
+                const url = `${SEEDVC_HF_SPACE}/gradio_api/call${SEEDVC_API_ENDPOINT}/${eventId}`;
+                const evtSource = new EventSource(url);
+                evtSource.addEventListener('heartbeat', () => {
+                    if (onProgress) onProgress('处理中...');
+                });
+                evtSource.addEventListener('progress', (e) => {
+                    if (onProgress) onProgress('AI 转换中...');
+                });
+                evtSource.addEventListener('complete', (e) => {
+                    evtSource.close();
+                    try {
+                        const data = JSON.parse(e.data);
+                        // data 是一个数组 [stream_output, full_output]
+                        // 我们要完整输出（第二个）
+                        const fullOutput = data[1];
+                        if (fullOutput && fullOutput.url) {
+                            resolve(fullOutput.url);
+                        } else if (fullOutput && fullOutput.path) {
+                            resolve(`${SEEDVC_HF_SPACE}/gradio_api/file=${fullOutput.path}`);
+                        } else {
+                            reject(new Error('未获取到输出音频'));
+                        }
+                    } catch (err) {
+                        reject(new Error('解析结果失败: ' + err.message));
+                    }
+                });
+                evtSource.addEventListener('error', (e) => {
+                    evtSource.close();
+                    console.warn('Gradio SSE error data:', e.data);
+                    if (e.data && e.data !== 'null') {
+                        try {
+                            const parsed = JSON.parse(e.data);
+                            if (parsed && typeof parsed === 'object') {
+                                reject(new Error(parsed.error || parsed.message || JSON.stringify(parsed)));
+                            } else {
+                                reject(new Error('AI 服务内部错误，请在 HuggingFace 页面确认 Space 已启动后重试'));
+                            }
+                        } catch (_) {
+                            reject(new Error(e.data));
+                        }
+                    } else {
+                        reject(new Error('AI 服务内部错误。可能原因：Space 正在冷启动 / GPU 资源不足。请访问 huggingface.co/spaces/Plachta/Seed-VC 确认状态后重试'));
+                    }
+                });
+                evtSource.onerror = () => {
+                    evtSource.close();
+                    reject(new Error('无法连接 AI 服务，请检查网络或稍后重试'));
+                };
+            });
+        }
+
+        // 用 Web Audio API 切片音频
+        async function sliceAudioByTimestamps(audioUrl) {
+            const resp = await fetch(audioUrl);
+            if (!resp.ok) throw new Error('下载转换音频失败');
+            const arrayBuffer = await resp.arrayBuffer();
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+
+            const noteBlobs = {};
+            const sampleRate = audioBuffer.sampleRate;
+            const numChannels = audioBuffer.numberOfChannels;
+
+            for (const slice of NOTE_SLICES) {
+                const startSample = Math.floor(slice.start * sampleRate);
+                const endSample = Math.floor(slice.end * sampleRate);
+                const length = endSample - startSample;
+
+                // 创建离线上下文来渲染切片
+                const offlineCtx = new OfflineAudioContext(numChannels, length, sampleRate);
+                const source = offlineCtx.createBufferSource();
+
+                // 复制切片数据
+                const sliceBuffer = offlineCtx.createBuffer(numChannels, length, sampleRate);
+                for (let ch = 0; ch < numChannels; ch++) {
+                    const channelData = audioBuffer.getChannelData(ch);
+                    sliceBuffer.copyToChannel(channelData.slice(startSample, endSample), ch);
+                }
+                source.buffer = sliceBuffer;
+                source.connect(offlineCtx.destination);
+                source.start();
+
+                const rendered = await offlineCtx.startRendering();
+
+                // 编码为 WAV blob
+                const wavBlob = audioBufferToWavBlob(rendered);
+                noteBlobs[slice.note] = wavBlob;
+            }
+
+            audioCtx.close();
+            return noteBlobs;
+        }
+
+        // AudioBuffer → WAV Blob
+        function audioBufferToWavBlob(buffer) {
+            const numChannels = buffer.numberOfChannels;
+            const sampleRate = buffer.sampleRate;
+            const length = buffer.length;
+            const bytesPerSample = 2; // 16-bit
+            const blockAlign = numChannels * bytesPerSample;
+            const dataSize = length * blockAlign;
+            const headerSize = 44;
+            const arrayBuffer = new ArrayBuffer(headerSize + dataSize);
+            const view = new DataView(arrayBuffer);
+
+            // WAV header
+            const writeStr = (offset, str) => { for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i)); };
+            writeStr(0, 'RIFF');
+            view.setUint32(4, 36 + dataSize, true);
+            writeStr(8, 'WAVE');
+            writeStr(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true); // PCM
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * blockAlign, true);
+            view.setUint16(32, blockAlign, true);
+            view.setUint16(34, 16, true); // bits per sample
+            writeStr(36, 'data');
+            view.setUint32(40, dataSize, true);
+
+            // Interleave channels and write samples
+            let offset = 44;
+            for (let i = 0; i < length; i++) {
+                for (let ch = 0; ch < numChannels; ch++) {
+                    const sample = Math.max(-1, Math.min(1, buffer.getChannelData(ch)[i]));
+                    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+                    offset += 2;
+                }
+            }
+            return new Blob([arrayBuffer], { type: 'audio/wav' });
+        }
+
+        // === 导出/导入声线预设 ===
+        async function exportVoicePreset(presetKey) {
+            const idbData = await getIDBPreset(presetKey);
+            if (!idbData) throw new Error('找不到该预设');
+            const exportData = {
+                version: 1,
+                name: idbData.name,
+                notes: idbData.notes,
+                createdAt: idbData.createdAt,
+                samples: {}
+            };
+            for (const note of idbData.notes) {
+                const blob = idbData.samples[note];
+                const arrayBuf = await blob.arrayBuffer();
+                const bytes = new Uint8Array(arrayBuf);
+                let binary = '';
+                const chunkSize = 8192;
+                for (let i = 0; i < bytes.length; i += chunkSize) {
+                    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+                }
+                exportData.samples[note] = btoa(binary);
+            }
+            const json = JSON.stringify(exportData);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${idbData.name || presetKey}.wpvoice`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        async function importVoicePreset(file) {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            if (!data.version || !data.notes || !data.samples) throw new Error('无效的声线文件');
+            const noteBlobs = {};
+            for (const note of data.notes) {
+                const binary = atob(data.samples[note]);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                noteBlobs[note] = new Blob([bytes], { type: 'audio/wav' });
+            }
+            const presetKey = 'imported_' + Date.now();
+            const displayName = data.name || `导入声线 ${new Date().toLocaleString('zh-CN')}`;
+            await savePresetToIDB(presetKey, displayName, noteBlobs);
+            VOICE_PRESETS[presetKey] = {
+                name: displayName,
+                source: 'indexeddb',
+                range: { min: 'C4', max: 'C5' },
+                notes: data.notes
+            };
+            initVoicePresetSelector();
+            const select = document.getElementById('voicePresetSelect');
+            select.value = presetKey;
+            loadVoicePreset(presetKey);
+            return displayName;
+        }
+
         function initVoiceClone() {
             const cloneBtn = document.getElementById('voiceCloneBtn');
             const modal = document.getElementById('voiceCloneModal');
@@ -6147,7 +6381,7 @@ registerProcessor('freeverb-processor', FreeverbProcessor);
             vcSliders.forEach(([sliderId, valId, fmt]) => {
                 const slider = document.getElementById(sliderId);
                 const valSpan = document.getElementById(valId);
-                slider.addEventListener('input', () => { valSpan.textContent = fmt(slider.value); });
+                if (slider && valSpan) slider.addEventListener('input', () => { valSpan.textContent = fmt(slider.value); });
             });
 
             cloneBtn.addEventListener('click', () => {
@@ -6160,6 +6394,37 @@ registerProcessor('freeverb-processor', FreeverbProcessor);
             closeBtn.addEventListener('click', () => modal.classList.remove('active'));
             modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('active'); });
 
+            // 导出按钮
+            document.getElementById('voiceExportBtn').addEventListener('click', async () => {
+                const select = document.getElementById('voicePresetSelect');
+                const preset = VOICE_PRESETS[select.value];
+                if (!preset || preset.source !== 'indexeddb') {
+                    statusEl.innerText = '⚠️ 只能导出克隆的声线';
+                    return;
+                }
+                try {
+                    await exportVoicePreset(select.value);
+                    statusEl.innerText = `📤 已导出: ${preset.name}`;
+                } catch (e) {
+                    statusEl.innerText = `❌ 导出失败: ${e.message}`;
+                }
+            });
+
+            // 导入按钮
+            const importFileInput = document.getElementById('voiceImportFile');
+            document.getElementById('voiceImportBtn').addEventListener('click', () => importFileInput.click());
+            importFileInput.addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                try {
+                    const name = await importVoicePreset(file);
+                    statusEl.innerText = `📥 已导入: ${name}`;
+                } catch (err) {
+                    statusEl.innerText = `❌ 导入失败: ${err.message}`;
+                }
+                importFileInput.value = '';
+            });
+
             startBtn.addEventListener('click', async () => {
                 const file = fileInput.files[0];
                 const displayName = displayInput.value.trim() || `克隆声线 ${new Date().toLocaleString('zh-CN', {month:'numeric',day:'numeric',hour:'numeric',minute:'numeric'})}`;
@@ -6171,19 +6436,12 @@ registerProcessor('freeverb-processor', FreeverbProcessor);
                 [fileInput, displayInput].forEach(el => el.disabled = true);
                 errorArea.style.display = 'none';
                 progressArea.style.display = 'block';
-                progressText.textContent = '上传中...';
-                progressBar.style.width = '0%';
-                progressPercent.textContent = '0%';
 
-                const formData = new FormData();
-                formData.append('reference', file);
-                formData.append('displayName', displayName);
-                formData.append('diffusionSteps', document.getElementById('vcDiffusionSteps').value);
-                formData.append('cfgRate', document.getElementById('vcCfgRate').value);
-                formData.append('lengthAdjust', document.getElementById('vcLengthAdjust').value);
-                formData.append('semiToneShift', document.getElementById('vcSemiToneShift').value);
-                formData.append('f0Condition', document.getElementById('vcF0Condition').checked);
-                formData.append('autoF0Adjust', document.getElementById('vcAutoF0Adjust').checked);
+                const setProgress = (text, percent) => {
+                    progressText.textContent = text;
+                    progressBar.style.width = percent + '%';
+                    progressPercent.textContent = percent + '%';
+                };
 
                 const resetControls = () => {
                     startBtn.disabled = false;
@@ -6191,88 +6449,68 @@ registerProcessor('freeverb-processor', FreeverbProcessor);
                 };
 
                 try {
-                    const resp = await fetch('/api/voice-clone', { method: 'POST', body: formData });
-                    const data = await resp.json();
-                    if (!resp.ok) throw new Error(data.error || '上传失败');
+                    // 1. 获取源音频
+                    setProgress('加载源音频...', 5);
+                    const sourceResp = await fetch(SOURCE_AUDIO_PATH);
+                    if (!sourceResp.ok) throw new Error('无法加载源音频 notes13.mp3');
+                    const sourceBlob = await sourceResp.blob();
 
-                    const evtSource = new EventSource(`/api/voice-clone/progress/${data.jobId}`);
+                    // 2. 上传源音频和参考音频到 HF Space
+                    setProgress('上传音频到 AI 服务...', 15);
+                    const [sourcePath, refPath] = await Promise.all([
+                        hfUploadFile(sourceBlob, 'notes13.mp3'),
+                        hfUploadFile(file, file.name)
+                    ]);
 
-                    evtSource.onmessage = async (event) => {
-                        const msg = JSON.parse(event.data);
-
-                        if (msg.error) {
-                            evtSource.close();
-                            errorArea.style.display = 'block';
-                            errorArea.textContent = msg.message;
-                            resetControls();
-                            return;
-                        }
-
-                        if (msg.percent !== undefined) {
-                            progressBar.style.width = msg.percent + '%';
-                            progressPercent.textContent = msg.percent + '%';
-                            progressText.textContent = msg.message || '处理中...';
-                        }
-
-                        if (msg.done && msg.result) {
-                            evtSource.close();
-                            const r = msg.result;
-                            progressText.textContent = '保存到本地存储...';
-                            progressBar.style.width = '95%';
-                            progressPercent.textContent = '95%';
-
-                            try {
-                                // Download WAVs to IndexedDB, then delete from server
-                                await downloadPresetToIDB(r.preset_key, displayName, r.preset_path, r.notes);
-
-                                VOICE_PRESETS[r.preset_key] = {
-                                    name: displayName,
-                                    source: 'indexeddb',
-                                    range: { min: 'C4', max: 'C5' },
-                                    notes: r.notes
-                                };
-                                initVoicePresetSelector();
-                                const select = document.getElementById('voicePresetSelect');
-                                select.value = r.preset_key;
-                                select.dispatchEvent(new Event('change'));
-                                loadVoicePreset(r.preset_key);
-                                progressText.textContent = '完成！';
-                                progressBar.style.width = '100%';
-                                progressPercent.textContent = '100%';
-                                statusEl.innerText = `✅ 声线克隆完成: ${displayName}`;
-                            } catch (idbErr) {
-                                console.error('IDB save failed:', idbErr);
-                                // Fallback: keep on server
-                                VOICE_PRESETS[r.preset_key] = {
-                                    name: displayName,
-                                    path: r.preset_path,
-                                    range: { min: 'C4', max: 'C5' },
-                                    notes: r.notes
-                                };
-                                initVoicePresetSelector();
-                                const select = document.getElementById('voicePresetSelect');
-                                select.value = r.preset_key;
-                                select.dispatchEvent(new Event('change'));
-                                loadVoicePreset(r.preset_key);
-                                progressText.textContent = '完成（本地存储失败，使用服务器模式）';
-                                progressBar.style.width = '100%';
-                                progressPercent.textContent = '100%';
-                                statusEl.innerText = `⚠️ 声线已克隆但未保存到本地: ${displayName}`;
-                            }
-                            setTimeout(() => {
-                                modal.classList.remove('active');
-                                resetControls();
-                            }, 1500);
-                        }
+                    // 3. 读取参数并调用 API
+                    setProgress('提交 AI 转换任务...', 25);
+                    const params = {
+                        diffusionSteps: parseInt(document.getElementById('vcDiffusionSteps').value),
+                        lengthAdjust: parseFloat(document.getElementById('vcLengthAdjust').value),
+                        cfgRate: parseFloat(document.getElementById('vcCfgRate').value),
+                        f0Condition: document.getElementById('vcF0Condition').checked,
+                        autoF0Adjust: document.getElementById('vcAutoF0Adjust').checked,
+                        pitchShift: parseInt(document.getElementById('vcSemiToneShift').value)
                     };
+                    const eventId = await hfPredict(sourcePath, refPath, params);
 
-                    evtSource.onerror = () => {
-                        evtSource.close();
-                        errorArea.style.display = 'block';
-                        errorArea.textContent = '连接中断，请检查服务器状态';
+                    // 4. 等待 AI 处理完成
+                    setProgress('AI 转换中（可能需要1-3分钟）...', 35);
+                    const audioUrl = await hfGetResult(eventId, (msg) => {
+                        setProgress(msg, 50);
+                    });
+
+                    // 5. 下载并切片
+                    setProgress('切片音频...', 70);
+                    const noteBlobs = await sliceAudioByTimestamps(audioUrl);
+
+                    // 6. 保存到 IndexedDB
+                    setProgress('保存到本地...', 90);
+                    const presetKey = 'clone_' + Date.now();
+                    const noteNames = NOTE_SLICES.map(s => s.note);
+                    await savePresetToIDB(presetKey, displayName, noteBlobs);
+
+                    VOICE_PRESETS[presetKey] = {
+                        name: displayName,
+                        source: 'indexeddb',
+                        range: { min: 'C4', max: 'C5' },
+                        notes: noteNames
+                    };
+                    initVoicePresetSelector();
+                    const select = document.getElementById('voicePresetSelect');
+                    select.value = presetKey;
+                    select.dispatchEvent(new Event('change'));
+                    loadVoicePreset(presetKey);
+
+                    setProgress('完成！', 100);
+                    statusEl.innerText = `✅ 声线克隆完成: ${displayName}`;
+
+                    setTimeout(() => {
+                        modal.classList.remove('active');
                         resetControls();
-                    };
+                    }, 1500);
                 } catch (err) {
+                    console.error('Voice clone error:', err);
                     errorArea.style.display = 'block';
                     errorArea.textContent = err.message;
                     resetControls();
@@ -7085,8 +7323,10 @@ registerProcessor('freeverb-processor', FreeverbProcessor);
 
                 // 显示/隐藏预设选择器和效果面板
                 document.getElementById('voicePresetSelect').style.display = currentSoundMode === 'voice' ? 'block' : 'none';
-                document.getElementById('voiceCloneBtn').style.display = currentSoundMode === 'voice' ? 'block' : 'none';
+                document.getElementById('voiceCloneBtn').style.display = currentSoundMode === 'voice' ? 'inline-block' : 'none';
                 document.getElementById('voiceEffectsPanel').style.display = currentSoundMode === 'voice' ? 'block' : 'none';
+                document.getElementById('voiceExportBtn').style.display = currentSoundMode === 'voice' ? 'inline-block' : 'none';
+                document.getElementById('voiceImportBtn').style.display = currentSoundMode === 'voice' ? 'inline-block' : 'none';
                 // 删除按钮：voice 模式下且当前选中的是 IDB 预设才显示
                 const delBtn = document.getElementById('voiceDeletePresetBtn');
                 if (currentSoundMode === 'voice') {
@@ -7799,8 +8039,8 @@ registerProcessor('freeverb-processor', FreeverbProcessor);
                         <div style="display:flex;align-items:center;justify-content:space-between;">
                             <label class="label-small" style="margin:0;" title="扩散步数，越高质量越好但越慢（10-100）">扩散步数</label>
                             <div style="display:flex;align-items:center;gap:6px;">
-                                <input type="range" id="vcDiffusionSteps" min="10" max="100" step="5" value="30" style="width:100px;">
-                                <span id="vcDiffusionStepsVal" style="min-width:24px;text-align:right;" class="value-display">30</span>
+                                <input type="range" id="vcDiffusionSteps" min="10" max="100" step="5" value="40" style="width:100px;">
+                                <span id="vcDiffusionStepsVal" style="min-width:24px;text-align:right;" class="value-display">40</span>
                             </div>
                         </div>
                         <div style="display:flex;align-items:center;justify-content:space-between;">
@@ -7820,7 +8060,7 @@ registerProcessor('freeverb-processor', FreeverbProcessor);
                         <div style="display:flex;align-items:center;justify-content:space-between;">
                             <label class="label-small" style="margin:0;" title="半音偏移，正值升调负值降调（-12到12）">半音偏移</label>
                             <div style="display:flex;align-items:center;gap:6px;">
-                                <input type="range" id="vcSemiToneShift" min="-12" max="12" step="1" value="0" style="width:100px;">
+                                <input type="range" id="vcSemiToneShift" min="-24" max="24" step="1" value="0" style="width:100px;">
                                 <span id="vcSemiToneShiftVal" style="min-width:24px;text-align:right;" class="value-display">0</span>
                             </div>
                         </div>
@@ -7846,6 +8086,9 @@ registerProcessor('freeverb-processor', FreeverbProcessor);
                 </div>
                 <div id="vcErrorArea" style="display:none;color:#ff6b6b;"></div>
                 <button class="btn" id="vcStartBtn">开始克隆</button>
+                <div style="font-size:11px;color:var(--text-secondary);opacity:0.6;text-align:center;">
+                    由 <a href="https://huggingface.co/spaces/Plachta/Seed-VC" target="_blank" style="color:inherit;">Seed-VC</a> 提供 AI 转换，首次使用可能需要等待模型加载
+                </div>
             </div>
         </div>
     </div>

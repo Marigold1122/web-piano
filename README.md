@@ -1,12 +1,13 @@
 # 🎹 Web Piano
 
-一个基于浏览器的在线钢琴/音乐工作站，支持多种乐器采样、MIDI 导入导出、声线克隆等功能。
+一个基于浏览器的在线钢琴/音乐工作站，支持多种乐器采样、MIDI 导入导出、AI 声线克隆等功能。
 
 ## ✨ 功能特性
 
 - **多乐器采样**：钢琴、小提琴、电吉他、真实鼓组
 - **MIDI 支持**：导入/导出 MIDI 文件，多轨道编辑
-- **声线克隆**：基于 seed-vc 的 AI 声线转换
+- **AI 声线克隆**：基于 [Seed-VC](https://huggingface.co/spaces/Plachta/Seed-VC) 的在线声线转换，无需后端服务器
+- **声线管理**：克隆的声线保存在浏览器本地（IndexedDB），支持导出/导入 `.wpvoice` 文件
 - **WAV 导出**：高质量音频渲染，支持后台处理
 - **混响效果**：Freeverb 算法，可调节湿度和衰减
 - **轨道管理**：独奏、静音、音量调节、乐器切换
@@ -15,24 +16,35 @@
 
 直接用浏览器打开 `index.html` 即可使用基础功能。
 
-如需使用声线克隆功能，需要启动后端服务：
+本地开发可运行 `start.bat` 启动本地服务器（需要 Python）：
 
 ```bash
-node server.js
+start.bat
+# 访问 http://localhost:8080
 ```
+
+## 🎙️ 声线克隆
+
+1. 切换到「人声唱调」模式
+2. 点击「克隆声线」按钮，上传一段 5-25 秒的参考音频
+3. 等待 AI 转换完成（首次使用需等待 HF Space 启动）
+4. 克隆的声线自动保存到浏览器本地，可通过「导出」按钮备份为 `.wpvoice` 文件
 
 ## 📁 项目结构
 
 ```
 web-piano/
-├── index.html      # 主页面
-├── lib/            # 依赖库 (Tone.js, Midi.js)
-└── samples/        # 乐器采样
-    ├── piano/      # 钢琴
-    ├── violin/     # 小提琴
-    ├── guitar/     # 电吉他
-    ├── drums/      # 鼓组
-    └── ...         # 人声预设
+├── index.html          # 主页面（含全部前端逻辑）
+├── start.bat           # 本地开发服务器启动脚本
+├── vercel.json         # Vercel 部署配置
+├── lib/                # 依赖库 (Tone.js, Midi.js)
+└── samples/            # 乐器采样
+    ├── piano/          # 钢琴
+    ├── violin/         # 小提琴
+    ├── guitar/         # 电吉他
+    ├── drums/          # 鼓组
+    ├── source/         # AI 声线转换源音频
+    └── ...             # 人声预设
 ```
 
 ## 🎵 使用说明
