@@ -7297,16 +7297,21 @@ registerProcessor('freeverb-processor', FreeverbProcessor);
 
             const updateModeSelect = () => {
                 modeSelect.value = currentSoundMode;
-                // 采样未好时禁用对应选项
+                // 采样未好时禁用对应选项并显示加载提示
                 const voiceReady = !!(voiceSampler && voiceSampler.loaded);
                 const violinReady = !!(violinSampler && violinSampler.loaded);
                 const guitarReady = !!(guitarSampler && guitarSampler.loaded);
                 const drumsReady = !!(drumKit && drumKit.ready);
+                const loadingMap = {
+                    'voice': voiceReady, 'violin': violinReady,
+                    'guitar': guitarReady, 'drums': drumsReady
+                };
                 for (const opt of modeSelect.options) {
-                    if (opt.value === 'voice') opt.disabled = !voiceReady;
-                    else if (opt.value === 'violin') opt.disabled = !violinReady;
-                    else if (opt.value === 'guitar') opt.disabled = !guitarReady;
-                    else if (opt.value === 'drums') opt.disabled = !drumsReady;
+                    if (opt.value === 'piano') continue;
+                    const ready = loadingMap[opt.value];
+                    opt.disabled = !ready;
+                    const base = MODE_LABELS[opt.value] || opt.value;
+                    opt.textContent = ready ? base : base + '（加载中…）';
                 }
             };
 
@@ -7352,16 +7357,17 @@ registerProcessor('freeverb-processor', FreeverbProcessor);
             // 初始状态
             updateModeSelect();
 
-            // 异步加载完成后刷新选项状态
+            // 异步加载完成后刷新选项状态（每次轮询都更新，逐个解锁）
             const tryWatch = setInterval(() => {
+                updateModeSelect();
                 const voiceReady = voiceSampler && voiceSampler.loaded;
                 const violinReady = violinSampler && violinSampler.loaded;
+                const guitarReady = guitarSampler && guitarSampler.loaded;
                 const drumsReady = drumKit && drumKit.ready;
-                if (voiceReady && violinReady && drumsReady) {
-                    updateModeSelect();
+                if (voiceReady && violinReady && guitarReady && drumsReady) {
                     clearInterval(tryWatch);
                 }
-            }, 300);
+            }, 500);
         }
 
         // 进度条拖拽
